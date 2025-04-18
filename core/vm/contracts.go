@@ -24,7 +24,7 @@ import (
 	"maps"
 	"math"
 	"math/big"
-
+	"github.com/ZKNoxHQ/ETHFALCON/falcon"
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
@@ -37,6 +37,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/ripemd160"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 )
 
 // PrecompiledContract is the basic interface for native Go contracts. The implementation
@@ -135,6 +136,7 @@ var PrecompiledContractsPrague = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
 	common.BytesToAddress([]byte{0x10}): &bls12381MapG1{},
 	common.BytesToAddress([]byte{0x11}): &bls12381MapG2{},
+	common.BytesToAddress([]byte{0x13}): &falconvrfy{},
 }
 
 var PrecompiledContractsBLS = PrecompiledContractsPrague
@@ -1181,4 +1183,60 @@ func kZGToVersionedHash(kzg kzg4844.Commitment) common.Hash {
 	h[0] = blobCommitmentVersionKZG
 
 	return h
+}
+
+type falconvrfy struct{}
+
+func (c *falconvrfy) RequiredGas(input []byte) uint64 {
+	return 3000
+}
+
+func mustNewBytesType() abi.Type {
+	t, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func (f *falconvrfy) Run(input []byte) ([]byte, error) {
+	args := abi.Arguments{
+		{Type: mustNewBytesType()},
+		{Type: mustNewBytesType()},
+		{Type: mustNewBytesType()},
+	}
+
+
+	fmt.Printf("🔍 Input  (hex): %x\n", input)
+
+	decoded, err := args.Unpack(input)
+	if (err != nil){
+		return nil, errors.New("invalid input ABI")
+	}
+	if (len(decoded) != 3 ){
+		return nil, errors.New("not decoded 3 arguments")
+	}
+
+	sig, ok1 := decoded[0].([]byte)
+	msg, ok2 := decoded[1].([]byte)
+	pub, ok3 := decoded[2].([]byte)
+
+	fmt.Printf("🔍 Signature  (hex): %x\n", sig)
+	fmt.Printf("🔍 Message    (hex): %x\n", msg)
+	fmt.Printf("🔍 Public Key (hex): %x\n", pub)
+
+	if !ok1 || !ok2 || !ok3 {
+		return nil, errors.New("invalid input values")
+	}
+
+	ok, err := falcon.VerifySignature(sig, msg, pub)
+	output := []byte{0}
+	if err != nil {
+		output[0] = 0
+	}
+	
+	if ok {
+		output[0] = 1
+	}
+	return common.LeftPadBytes(output, 32), nil
 }
